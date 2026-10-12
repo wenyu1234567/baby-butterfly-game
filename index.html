@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>宝宝扑蝴蝶 🦋</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:100%; height:100%; overflow:hidden; touch-action:none;
+    font-family:"PingFang SC","Microsoft YaHei",sans-serif; }
+  #game { position:fixed; inset:0; display:block; }
+  /* 顶部计分板 */
+  #hud {
+    position:fixed; top:12px; left:50%; transform:translateX(-50%);
+    display:flex; gap:10px; align-items:center; z-index:10;
+    background:rgba(255,255,255,.75); backdrop-filter:blur(6px);
+    padding:8px 18px; border-radius:999px; box-shadow:0 4px 14px rgba(120,80,40,.18);
+    font-size:20px; font-weight:700; color:#7a4a2b; white-space:nowrap;
+  }
+  #hud .score { color:#e0568b; font-size:24px; }
+  #progressBar {
+    width:110px; height:10px; background:#f3d9b8; border-radius:999px; overflow:hidden;
+  }
+  #progressFill { height:100%; width:0%; background:linear-gradient(90deg,#ffb347,#ff5e9c);
+    border-radius:999px; transition:width .3s; }
+  /* 浮动加减分 */
+  .float-txt {
+    position:fixed; z-index:9; font-size:30px; font-weight:800; pointer-events:none;
+    animation:floatUp 1s ease-out forwards;
+  }
+  @keyframes floatUp {
+    0% { opacity:1; transform:translateY(0) scale(1); }
+    100% { opacity:0; transform:translateY(-60px) scale(1.4); }
+  }
+  /* 遮罩层：开始 / 通关 */
+  #overlay {
+    position:fixed; inset:0; z-index:20; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; gap:18px;
+    background:rgba(255,246,230,.92); padding:24px;
+  }
+  #overlay.hidden { display:none; }
+  #overlay h1 { font-size:34px; color:#e0568b; text-shadow:0 2px 0 #fff; }
+  #overlay p { font-size:18px; color:#7a4a2b; line-height:1.7; max-width:340px; }
+  #overlay .big { font-size:56px; }
+  #startBtn {
+    font-size:22px; font-weight:800; color:#fff; border:none; cursor:pointer;
+    background:linear-gradient(135deg,#ff8fab,#ff5e9c);
+    padding:14px 46px; border-radius:999px; box-shadow:0 6px 18px rgba(255,94,156,.45);
+  }
+  #startBtn:active { transform:scale(.95); }
+  .legend { display:flex; gap:18px; font-size:15px; color:#7a4a2b; }
+  .legend span { display:flex; align-items:center; gap:6px; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" style="display:none">
+  <span>🦋 得分 <span class="score" id="score">0</span>/10</span>
+  <div id="progressBar"><div id="progressFill"></div></div>
+</div>
+
+<div id="overlay">
+  <div class="big">🦋🐝</div>
+  <h1>宝宝扑蝴蝶</h1>
+  <p>宝宝的小手在花园里奔跑～<br>
+     上下左右移动去扑蝴蝶吧！<br><br>
+     🖱️ 电脑：方向键 / WASD / 鼠标移动<br>
+     📱 手机：手指拖动小手</p>
+  <div class="legend">
+    <span>🦋 扑到 +1 分</span>
+    <span>🐝 扑到蜜蜂 −1 分</span>
+  </div>
+  <p style="font-size:16px;color:#b06a8f">集满 <b>10</b> 分就通关啦！</p>
+  <button id="startBtn">开始游戏 🎀</button>
+</div>
+
+<script>
+(() => {
+"use strict";
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  buildFlowers();
+}
+window.addEventListener('resize', resize);
+
+/* ---------------- 背景：花园 ---------------- */
+let flowers = [], clouds = [], grassBlades = [];
+function buildFlowers() {
+  flowers = []; clouds = []; grassBlades = [];
+  const palette = ['#ff8fab','#ffb347','#c77dff','#5ec8f2','#ffd166','#ff6b6b','#f8a1d1'];
+  const n = Math.floor(W / 46) + 6;
+  for (let i = 0; i < n; i++) {
+    flowers.push({
+      x: Math.random() * W,
+      y: H * 0.55 + Math.random() * H * 0.48,
+      r: 9 + Math.random() * 14,
+      petals: 5 + Math.floor(Math.random() * 3),
+      color: palette[Math.floor(Math.random() * palette.length)],
+      sway: Math.random() * Math.PI * 2,
+      swaySpeed: 0.8 + Math.random() * 0.8
+    });
+  }
+  for (let i = 0; i < 4; i++) {
+    clouds.push({ x: Math.random() * W, y: 40 + Math.random() * H * 0.22,
+      s: 0.7 + Math.random() * 0.8, v: 6 + Math.random() * 8 });
+  }
+  for (let x = 0; x < W; x += 14) {
+    grassBlades.push({ x, h: 10 + Math.random() * 22, phase: Math.random() * Math.PI * 2 });
+  }
+}
+
+function drawBackground(t) {
+  // 天空
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#aee9ff');
+  sky.addColorStop(0.45, '#d8f7e8');
+  sky.addColorStop(1, '#fdeecb');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+
+  // 太阳
+  ctx.save();
+  ctx.translate(W - 70, 80);
+  ctx.fillStyle = 'rgba(255,220,90,.35)';
+  ctx.beginPath(); ctx.arc(0, 0, 52, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath(); ctx.arc(0, 0, 32, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+
+  // 云
+  ctx.fillStyle = 'rgba(255,255,255,.9)';
+  for (const c of clouds) {
+    c.x += c.v * 0.016;
+    if (c.x > W + 120) c.x = -120;
+    drawCloud(c.x, c.y, c.s);
+  }
+
+  // 远山草丘
+  ctx.fillStyle = '#b9e4a5';
+  ctx.beginPath();
+  ctx.moveTo(0, H * 0.62);
+  ctx.quadraticCurveTo(W * 0.25, H * 0.52, W * 0.5, H * 0.6);
+  ctx.quadraticCurveTo(W * 0.75, H * 0.68, W, H * 0.56);
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
+  ctx.fillStyle = '#9ed886';
+  ctx.beginPath();
+  ctx.moveTo(0, H * 0.72);
+  ctx.quadraticCurveTo(W * 0.5, H * 0.62, W, H * 0.7);
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
+
+  // 花
+  for (const f of flowers) {
+    f.sway += 0.016 * f.swaySpeed;
+    drawFlower(f, Math.sin(f.sway) * 0.12);
+  }
+
+  // 草
+  ctx.strokeStyle = '#7cc25e'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  for (const g of grassBlades) {
+    const gx = g.x + Math.sin(t * 1.2 + g.phase) * 3;
+    ctx.beginPath(); ctx.moveTo(g.x, H);
+    ctx.quadraticCurveTo(g.x, H - g.h * 0.6, gx, H - g.h);
+    ctx.stroke();
+  }
+}
+function drawCloud(x, y, s) {
+  ctx.beginPath();
+  ctx.arc(x, y, 22 * s, 0, Math.PI * 2);
+  ctx.arc(x + 26 * s, y - 10 * s, 18 * s, 0, Math.PI * 2);
+  ctx.arc(x + 52 * s, y, 20 * s, 0, Math.PI * 2);
+  ctx.arc(x + 26 * s, y + 8 * s, 22 * s, 0, Math.PI * 2);
+  ctx.fill();
+}
+function drawFlower(f, lean) {
+  ctx.save();
+  ctx.translate(f.x, f.y); ctx.rotate(lean);
+  // 茎
+  ctx.strokeStyle = '#5ea34e'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, f.r * 1.8); ctx.stroke();
+  // 花瓣
+  ctx.fillStyle = f.color;
+  for (let i = 0; i < f.petals; i++) {
+    const a = (i / f.petals) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.ellipse(Math.cos(a) * f.r, Math.sin(a) * f.r, f.r * 0.62, f.r * 0.42, a, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // 花心
+  ctx.fillStyle = '#ffe9a8';
+  ctx.beginPath(); ctx.arc(0, 0, f.r * 0.42, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+/* ---------------- 蝴蝶 / 蜜蜂 ---------------- */
+const butterflies = [], bees = [], sparkles = [];
+const BF_COLORS = [
+  { w1:'#ff6b9d', w2:'#ffa3c0' },
+  { w1:'#5ec8f2', w2:'#9adcff' },
+  { w1:'#c77dff', w2:'#e0b3ff' },
+  { w1:'#ffb347', w2:'#ffd98a' },
+  { w1:'#7ed957', w2:'#b4f09a' },
+];
+function spawnButterfly() {
+  const c = BF_COLORS[Math.floor(Math.random() * BF_COLORS.length)];
+  butterflies.push(makeInsect('butterfly', c));
+}
+function spawnBee() { bees.push(makeInsect('bee', null)); }
+function makeInsect(type, colors) {
+  return {
+    type, colors,
+    x: Math.random() * (W - 80) + 40,
+    y: H * 0.08 + Math.random() * H * 0.42,
+    vx: (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 60),
+    vy: (Math.random() < 0.5 ? -1 : 1) * (30 + Math.random() * 50),
+    wing: Math.random() * Math.PI * 2,
+    size: type === 'bee' ? 13 + Math.random() * 4 : 15 + Math.random() * 6,
+    turnT: 0,
+  };
+}
+function updateInsects(dt, t) {
+  for (const arr of [butterflies, bees]) {
+    for (const b of arr) {
+      b.wing += dt * 14;
+      b.turnT -= dt;
+      if (b.turnT <= 0) { // 随机转向，模拟飞舞
+        b.turnT = 0.6 + Math.random() * 1.4;
+        b.vx += (Math.random() - 0.5) * 160;
+        b.vy += (Math.random() - 0.5) * 140;
+        const sp = Math.hypot(b.vx, b.vy), max = 150;
+        if (sp > max) { b.vx *= max / sp; b.vy *= max / sp; }
+      }
+      b.x += b.vx * dt; b.y += b.vy * dt;
+      // 边界反弹
+      if (b.x < 30) { b.x = 30; b.vx = Math.abs(b.vx); }
+      if (b.x > W - 30) { b.x = W - 30; b.vx = -Math.abs(b.vx); }
+      if (b.y < H * 0.06) { b.y = H * 0.06; b.vy = Math.abs(b.vy); }
+      if (b.y > H * 0.55) { b.y = H * 0.55; b.vy = -Math.abs(b.vy); }
+    }
+  }
+  for (let i = sparkles.length - 1; i >= 0; i--) {
+    const s = sparkles[i];
+    s.life -= dt; s.y -= 40 * dt;
+    if (s.life <= 0) sparkles.splice(i, 1);
+  }
+}
+function drawButterfly(b, t) {
+  const flap = Math.abs(Math.sin(b.wing));
+  const s = b.size;
+  ctx.save(); ctx.translate(b.x, b.y + Math.sin(t * 3 + b.x) * 4);
+  const dir = b.vx >= 0 ? 1 : -1;
+  ctx.scale(dir, 1);
+  // 身体
+  ctx.fillStyle = '#5a3a2e';
+  ctx.beginPath(); ctx.ellipse(0, 0, s * 0.16, s * 0.62, 0, 0, Math.PI * 2); ctx.fill();
+  // 触角
+  ctx.strokeStyle = '#5a3a2e'; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-2, -s * 0.55); ctx.quadraticCurveTo(-7, -s * 1.0, -9, -s * 1.05); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(2, -s * 0.55); ctx.quadraticCurveTo(7, -s * 1.0, 9, -s * 1.05); ctx.stroke();
+  // 翅膀（上下两对，扑扇缩放）
+  const wf = 0.35 + flap * 0.65;
+  for (const side of [-1, 1]) {
+    // 上翅
+    ctx.fillStyle = b.colors.w1;
+    ctx.beginPath();
+    ctx.ellipse(side * s * 0.55 * wf, -s * 0.28, s * 0.62 * wf, s * 0.48, side * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+    // 下翅
+    ctx.fillStyle = b.colors.w2;
+    ctx.beginPath();
+    ctx.ellipse(side * s * 0.45 * wf, s * 0.32, s * 0.46 * wf, s * 0.34, side * -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    // 翅膀斑点
+    ctx.fillStyle = 'rgba(255,255,255,.85)';
+    ctx.beginPath();
+    ctx.arc(side * s * 0.6 * wf, -s * 0.3, s * 0.13 * wf, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawBee(b, t) {
+  const flap = Math.abs(Math.sin(b.wing * 2));
+  const s = b.size;
+  ctx.save(); ctx.translate(b.x, b.y + Math.sin(t * 4 + b.y) * 3);
+  const dir = b.vx >= 0 ? 1 : -1;
+  ctx.scale(dir, 1);
+  // 翅膀
+  ctx.fillStyle = 'rgba(200,230,255,.8)';
+  ctx.beginPath(); ctx.ellipse(-s * 0.1, -s * 0.75, s * 0.42, s * 0.2 * (0.4 + flap * 0.6), -0.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(s * 0.25, -s * 0.7, s * 0.38, s * 0.18 * (0.4 + flap * 0.6), -0.4, 0, Math.PI * 2); ctx.fill();
+  // 身体
+  ctx.fillStyle = '#ffd23f';
+  ctx.beginPath(); ctx.ellipse(0, 0, s * 0.62, s * 0.44, 0, 0, Math.PI * 2); ctx.fill();
+  // 条纹
+  ctx.fillStyle = '#4a3222';
+  for (const off of [-0.18, 0.14]) {
+    ctx.beginPath();
+    ctx.ellipse(s * off, 0, s * 0.1, s * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  // 头
+  ctx.fillStyle = '#4a3222';
+  ctx.beginPath(); ctx.arc(-s * 0.55, -s * 0.05, s * 0.24, 0, Math.PI * 2); ctx.fill();
+  // 针
+  ctx.strokeStyle = '#4a3222'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(s * 0.6, 0); ctx.lineTo(s * 0.85, 0); ctx.stroke();
+  ctx.restore();
+}
+function drawSparkles() {
+  for (const s of sparkles) {
+    ctx.globalAlpha = Math.max(s.life / s.max, 0);
+    ctx.fillStyle = s.color;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r * (s.life / s.max), 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------------- 宝宝双手 ---------------- */
+const baby = {
+  x: 0, y: 0,          // 双手中心点
+  bob: 0,              // 跑动起伏
+  lean: 0,             // 左右倾斜
+  reach: 0,            // 扑的伸长量
+};
+function resetBaby() {
+  baby.x = W / 2; baby.y = H - 110; baby.bob = 0; baby.lean = 0; baby.reach = 0;
+}
+function drawBaby(t) {
+  baby.bob += 0.14;
+  const bobY = Math.sin(baby.bob) * 6;
+  const spread = 34;                       // 两只手间距
+  const armLen = 70 + baby.reach;          // 手臂长度
+  const cx = baby.x, cy = baby.y + bobY;
+  const tilt = baby.lean;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(tilt);
+
+  for (const side of [-1, 1]) {
+    const hx = side * spread, hy = -armLen;   // 手掌位置（画面上方 = 扑向前）
+    // 袖子（粉色小衣袖）
+    ctx.fillStyle = '#ff9eb5';
+    ctx.beginPath();
+    ctx.ellipse(side * spread * 0.35, -10, 16, 20, side * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+    // 手臂
+    ctx.strokeStyle = '#ffd9b8';             // 宝宝肤色
+    ctx.lineWidth = 17; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(side * spread * 0.3, -4);
+    ctx.quadraticCurveTo(side * spread * 0.85, -armLen * 0.5, hx, hy + 8);
+    ctx.stroke();
+    // 小手（圆手掌 + 四根小手指 + 大拇指）
+    drawPalm(hx, hy, side);
+  }
+  ctx.restore();
+}
+function drawPalm(x, y, side) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = '#ffd9b8';
+  // 手掌
+  ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill();
+  // 手指
+  const fingers = [-0.55, -0.2, 0.18, 0.55];
+  for (let i = 0; i < 4; i++) {
+    const a = -Math.PI / 2 + fingers[i];
+    ctx.beginPath();
+    ctx.ellipse(Math.cos(a) * 17, Math.sin(a) * 17, 5.2, 8.5, a + Math.PI / 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // 大拇指
+  const ta = side > 0 ? -0.15 : Math.PI + 0.15;
+  ctx.beginPath();
+  ctx.ellipse(Math.cos(ta) * 18, Math.sin(ta) * 15, 5.5, 8.5, ta + Math.PI / 2, 0, Math.PI * 2);
+  ctx.fill();
+  // 腮红小圆点（可爱装饰）
+  ctx.fillStyle = 'rgba(255,150,170,.0)';
+  ctx.beginPath(); ctx.arc(0, 6, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+/* ---------------- 游戏状态 ---------------- */
+let playing = false, score = 0, lastT = 0;
+const TARGET = 10;
+let bfTimer = 0, beeTimer = 0;
+
+const scoreEl = document.getElementById('score');
+const fillEl = document.getElementById('progressFill');
+const hud = document.getElementById('hud');
+const overlay = document.getElementById('overlay');
+
+function startGame() {
+  score = 0;
+  butterflies.length = 0; bees.length = 0; sparkles.length = 0;
+  resetBaby();
+  for (let i = 0; i < 4; i++) spawnButterfly();
+  spawnBee();
+  scoreEl.textContent = '0'; fillEl.style.width = '0%';
+  hud.style.display = 'flex';
+  overlay.classList.add('hidden');
+  playing = true;
+  lastT = performance.now();
+}
+document.getElementById('startBtn').addEventListener('click', startGame);
+
+function addScore(v, x, y) {
+  score += v;
+  scoreEl.textContent = score;
+  fillEl.style.width = Math.max(0, Math.min(100, score / TARGET * 100)) + '%';
+  const el = document.createElement('div');
+  el.className = 'float-txt';
+  el.textContent = v > 0 ? '+1 🦋' : '−1 🐝';
+  el.style.color = v > 0 ? '#e0568b' : '#4a9b5e';
+  el.style.left = (x - 20) + 'px';
+  el.style.top = (y - 30) + 'px';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1000);
+}
+
+function checkCatch() {
+  const spread = 34, armLen = 70 + baby.reach;
+  for (const arr of [butterflies, bees]) {
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const b = arr[i];
+      const hx1 = baby.x - spread, hx2 = baby.x + spread;
+      const hy = baby.y - armLen;
+      for (const hx of [hx1, hx2]) {
+        const d = Math.hypot(b.x - hx, b.y - hy);
+        if (d < 42) {
+          const isBf = arr === butterflies;
+          addScore(isBf ? 1 : -1, b.x, b.y);
+          for (let k = 0; k < 8; k++) {
+            sparkles.push({
+              x: b.x + (Math.random() - 0.5) * 30, y: b.y + (Math.random() - 0.5) * 30,
+              r: 3 + Math.random() * 4, life: 0.6, max: 0.6,
+              color: isBf ? '#ffd166' : '#8fd694'
+            });
+          }
+          arr.splice(i, 1);
+          break;
+        }
+      }
+    }
+  }
+  // 补充昆虫
+  bfTimer -= 1 / 60; beeTimer -= 1 / 60;
+  if (butterflies.length < 5 && bfTimer <= 0) { spawnButterfly(); bfTimer = 0.5 + Math.random(); }
+  if (bees.length < 2 && beeTimer <= 0) { spawnBee(); beeTimer = 2 + Math.random() * 2; }
+
+  if (score >= TARGET && playing) {
+    playing = false;
+    setTimeout(showWin, 500);
+  }
+}
+function showWin() {
+  overlay.classList.remove('hidden');
+  overlay.innerHTML = `
+    <div class="big">🎉🦋🎉</div>
+    <h1>太棒啦！扑到 ${TARGET} 只蝴蝶！</h1>
+    <p>宝宝真是扑蝴蝶小能手～<br>花园里的蝴蝶都想跟你玩！</p>
+    <button id="againBtn">再玩一次 🎀</button>
+    <p style="font-size:14px;color:#b08a6a">🎁 撒花庆祝～</p>`;
+  document.getElementById('againBtn').addEventListener('click', () => location.reload());
+  confetti();
+}
+function confetti() {
+  for (let i = 0; i < 60; i++) {
+    setTimeout(() => {
+      const el = document.createElement('div');
+      el.className = 'float-txt';
+      el.textContent = ['🦋','🌸','🌼','✨','🎀'][Math.floor(Math.random() * 5)];
+      el.style.left = Math.random() * window.innerWidth + 'px';
+      el.style.top = (window.innerHeight * 0.2 + Math.random() * 100) + 'px';
+      el.style.fontSize = (20 + Math.random() * 20) + 'px';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 1000);
+    }, i * 60);
+  }
+}
+
+/* ---------------- 输入控制 ---------------- */
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if (['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase())) e.preventDefault();
+});
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+// 鼠标 / 触摸：小手跟随
+let pointerActive = false;
+function pointerMove(clientX, clientY) {
+  if (!playing) return;
+  baby.x = Math.max(40, Math.min(W - 40, clientX));
+  baby.y = Math.max(H * 0.35, Math.min(H - 60, clientY));
+  baby.lean = Math.max(-0.25, Math.min(0.25, (clientX - baby.x) * 0));
+  baby.reach = 20; // 跟随时伸长
+  clearTimeout(pointerMove._t);
+  pointerMove._t = setTimeout(() => baby.reach = 0, 250);
+}
+canvas.addEventListener('mousemove', e => pointerMove(e.clientX, e.clientY));
+canvas.addEventListener('touchstart', e => { pointerActive = true; const t = e.touches[0]; pointerMove(t.clientX, t.clientY); }, {passive:true});
+canvas.addEventListener('touchmove', e => { e.preventDefault(); const t = e.touches[0]; pointerMove(t.clientX, t.clientY); }, {passive:false});
+
+function keyboardMove(dt) {
+  if (!playing) return;
+  const speed = 320 * dt;
+  let dx = 0, dy = 0;
+  if (keys['arrowleft'] || keys['a']) dx -= speed;
+  if (keys['arrowright'] || keys['d']) dx += speed;
+  if (keys['arrowup'] || keys['w']) dy -= speed;
+  if (keys['arrowdown'] || keys['s']) dy += speed;
+  if (dx || dy) {
+    baby.x = Math.max(40, Math.min(W - 40, baby.x + dx));
+    baby.y = Math.max(H * 0.35, Math.min(H - 60, baby.y + dy));
+    baby.lean = Math.max(-0.25, Math.min(0.25, dx * 0.0008));
+    baby.reach = 18;
+    clearTimeout(keyboardMove._t);
+    keyboardMove._t = setTimeout(() => { baby.reach = 0; baby.lean = 0; }, 300);
+  }
+}
+
+/* ---------------- 主循环 ---------------- */
+function loop(now) {
+  const dt = Math.min((now - lastT) / 1000, 0.05);
+  lastT = now;
+  const t = now / 1000;
+
+  drawBackground(t);
+  keyboardMove(dt);
+  if (playing) { updateInsects(dt, t); checkCatch(); }
+  for (const b of butterflies) drawButterfly(b, t);
+  for (const b of bees) drawBee(b, t);
+  drawSparkles();
+  drawBaby(t);
+
+  requestAnimationFrame(loop);
+}
+resize();
+resetBaby();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
